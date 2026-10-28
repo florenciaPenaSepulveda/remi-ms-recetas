@@ -37,6 +37,12 @@ export class Recipe {
   @Prop({ required: true, min: 1 })
   servings: number;
 
+  @Prop({ min: 1, max: 1440 })
+  prepMinutes?: number;
+
+  @Prop({ enum: ['facil', 'media', 'dificil'] })
+  difficulty?: string;
+
   @Prop({ type: [String], default: [] })
   instructions: string[];
 

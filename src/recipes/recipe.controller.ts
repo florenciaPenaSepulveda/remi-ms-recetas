@@ -5,6 +5,7 @@ import {
   CategoriesMessage,
   CreateRecipeMessage,
   MaxCaloriesMessage,
+  PantryMessage,
   RecipesByIdsMessage,
   RemoveRecipeMessage,
   SearchByIngredientsMessage,
@@ -57,6 +58,16 @@ export class RecipeController {
     @Payload() { ingredients, mode }: SearchByIngredientsMessage,
   ) {
     return this.recipeService.searchByIngredients(ingredients, mode);
+  }
+
+  @MessagePattern({ cmd: 'search_recipes_by_pantry' })
+  searchByPantry(@Payload() { ingredients, maxMissing }: PantryMessage) {
+    return this.recipeService.searchByPantry(ingredients, maxMissing);
+  }
+
+  @MessagePattern({ cmd: 'count_recipes' })
+  count() {
+    return this.recipeService.count();
   }
 
   @MessagePattern({ cmd: 'search_recipes_by_max_calories' })

@@ -11,6 +11,9 @@ export class Ingredient {
 
   @Prop({ min: 0 })
   caloriesPerUnit?: number;
+
+  @Prop({ default: false })
+  staple: boolean;
 }
 
 export type IngredientDocument = HydratedDocument<Ingredient>;

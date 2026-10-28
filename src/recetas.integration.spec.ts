@@ -71,7 +71,8 @@ describe('Servicio de recetas', () => {
         { name: 'Pasta', unit: 'gramos', caloriesPerUnit: 3 },
         { name: 'Tomate', unit: 'unidad', caloriesPerUnit: 20 },
         { name: 'Queso', unit: 'gramos', caloriesPerUnit: 4 },
-        { name: 'Sal' },
+        { name: 'Sal', staple: true },
+        { name: 'Albahaca', unit: 'gramos', caloriesPerUnit: 0.2 },
       ],
     });
   });
@@ -103,6 +104,7 @@ describe('Servicio de recetas', () => {
     it('lista ordenada por nombre y vacía sin error', async () => {
       const lista = await enviar<any[]>('find_all_ingredients');
       expect(lista.map((i) => i.name as string)).toEqual([
+        'Albahaca',
         'Pasta',
         'Queso',
         'Sal',
@@ -477,6 +479,141 @@ describe('Servicio de recetas', () => {
         userId: AUTORA,
       });
       expect(error.status).toBe(404);
+    });
+  });
+
+  describe('despensa', () => {
+    beforeEach(async () => {
+      await enviar('create_recipe', receta());
+      await enviar(
+        'create_recipe',
+        receta({
+          title: 'Pasta con queso',
+          ingredients: [
+            { name: 'Pasta', quantity: 200 },
+            { name: 'Queso', quantity: 80 },
+            { name: 'Sal', quantity: 3 },
+          ],
+        }),
+      );
+      await enviar(
+        'create_recipe',
+        receta({
+          title: 'Ensalada de tomate',
+          ingredients: [
+            { name: 'Tomate', quantity: 300 },
+            { name: 'Albahaca', quantity: 5 },
+            { name: 'Sal', quantity: 2 },
+          ],
+        }),
+      );
+    });
+
+    const titulos = (lista: any[]) => lista.map((r) => r.title as string);
+
+    it('ordena primero lo que se puede cocinar con lo que hay', async () => {
+      const lista = await enviar<any[]>('search_recipes_by_pantry', {
+        ingredients: ['pasta', 'QUESO', 'tomate'],
+      });
+      expect(titulos(lista)).toEqual([
+        'Pasta con queso',
+        'Pasta con tomate',
+        'Ensalada de tomate',
+      ]);
+      expect(lista[0].match).toEqual({
+        have: ['Pasta', 'Queso'],
+        missing: [],
+        total: 2,
+        percent: 100,
+      });
+    });
+
+    it('informa lo que falta y no cuenta los básicos como faltantes', async () => {
+      const lista = await enviar<any[]>('search_recipes_by_pantry', {
+        ingredients: ['Pasta'],
+      });
+      const conTomate = lista.find((r) => r.title === 'Pasta con tomate');
+      expect(conTomate.match.missing).toEqual(['Tomate']);
+      expect(conTomate.match.percent).toBe(50);
+      const conQueso = lista.find((r) => r.title === 'Pasta con queso');
+      expect(conQueso.match.missing).toEqual(['Queso']);
+      expect(conQueso.match.missing).not.toContain('Sal');
+    });
+
+    it('respeta el máximo de ingredientes faltantes', async () => {
+      const sinFaltas = await enviar<any[]>('search_recipes_by_pantry', {
+        ingredients: ['Pasta'],
+        maxMissing: 0,
+      });
+      expect(sinFaltas).toEqual([]);
+      const conUno = await enviar<any[]>('search_recipes_by_pantry', {
+        ingredients: ['Pasta'],
+        maxMissing: 1,
+      });
+      expect(conUno).toHaveLength(2);
+    });
+
+    it('ignora ingredientes desconocidos y devuelve vacío si no coincide nada', async () => {
+      expect(
+        await enviar('search_recipes_by_pantry', {
+          ingredients: ['Unicornio'],
+        }),
+      ).toEqual([]);
+      const lista = await enviar<any[]>('search_recipes_by_pantry', {
+        ingredients: ['Unicornio', 'Tomate'],
+      });
+      expect(titulos(lista)).toContain('Ensalada de tomate');
+    });
+
+    it('un básico por sí solo no basta para sugerir una receta', async () => {
+      expect(
+        await enviar('search_recipes_by_pantry', { ingredients: ['Sal'] }),
+      ).toEqual([]);
+    });
+
+    it('valida la entrada', async () => {
+      expect(
+        (await fallo('search_recipes_by_pantry', { ingredients: [] })).status,
+      ).toBe(400);
+      expect(
+        (
+          await fallo('search_recipes_by_pantry', {
+            ingredients: ['Pasta'],
+            maxMissing: 99,
+          })
+        ).status,
+      ).toBe(400);
+    });
+
+    it('cuenta las recetas', async () => {
+      expect(await enviar('count_recipes')).toBe(3);
+    });
+  });
+
+  describe('datos de preparación', () => {
+    it('guarda el tiempo y la dificultad', async () => {
+      const creada = await enviar(
+        'create_recipe',
+        receta({ prepMinutes: 25, difficulty: 'facil' }),
+      );
+      expect(creada.prepMinutes).toBe(25);
+      expect(creada.difficulty).toBe('facil');
+    });
+
+    it('rechaza valores fuera de rango', async () => {
+      expect(
+        (await fallo('create_recipe', receta({ prepMinutes: 0 }))).status,
+      ).toBe(400);
+      expect(
+        (await fallo('create_recipe', receta({ difficulty: 'imposible' })))
+          .status,
+      ).toBe(400);
+    });
+
+    it('marca los ingredientes básicos del catálogo', async () => {
+      const lista = await enviar<any[]>('find_all_ingredients');
+      expect(lista.find((i) => i.name === 'Sal').staple).toBe(true);
+      expect(lista.find((i) => i.name === 'Pasta').staple).toBe(false);
     });
   });
 });

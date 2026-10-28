@@ -19,6 +19,22 @@ interface LineaResuelta {
   unit?: string;
 }
 
+const normalizar = (texto: string) =>
+  texto
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim()
+    .toLowerCase();
+
+export interface CoincidenciaDeDespensa extends Record<string, unknown> {
+  match: {
+    have: string[];
+    missing: string[];
+    total: number;
+    percent: number;
+  };
+}
+
 const separar = (texto: string) =>
   texto
     .split(',')
@@ -90,6 +106,58 @@ export class RecipeService {
 
   findByIds(ids: string[]) {
     return this.buscar({ _id: { $in: ids } });
+  }
+
+  async searchByPantry(
+    nombres: string[],
+    maxMissing = 3,
+  ): Promise<CoincidenciaDeDespensa[]> {
+    const catalogo = await this.ingredientModel.find().exec();
+    const porNombre = new Map(catalogo.map((i) => [normalizar(i.name), i]));
+    const tengo = new Set<string>();
+    for (const nombre of nombres) {
+      const ingrediente = porNombre.get(normalizar(nombre));
+      if (ingrediente) {
+        tengo.add(String(ingrediente._id));
+      }
+    }
+    if (!tengo.size) {
+      return [];
+    }
+    const candidatas = await this.buscar({
+      'ingredients.ingredientId': { $in: [...tengo] },
+    });
+    const resultados = candidatas.flatMap((receta) => {
+      const principales = receta.ingredients
+        .map((linea) => linea.ingredientId as unknown as IngredientDocument)
+        .filter((ingrediente) => !ingrediente.staple);
+      const have = principales
+        .filter((i) => tengo.has(String(i._id)))
+        .map((i) => i.name);
+      const missing = principales
+        .filter((i) => !tengo.has(String(i._id)))
+        .map((i) => i.name);
+      if (!have.length || missing.length > maxMissing) {
+        return [];
+      }
+      const total = principales.length;
+      const match = {
+        have,
+        missing,
+        total,
+        percent: Math.round((have.length / total) * 100),
+      };
+      return [{ ...(receta.toJSON() as Record<string, unknown>), match }];
+    });
+    return resultados.sort(
+      (x, y) =>
+        x.match.missing.length - y.match.missing.length ||
+        y.match.have.length - x.match.have.length,
+    );
+  }
+
+  count() {
+    return this.recipeModel.countDocuments().exec();
   }
 
   async searchByIngredients(ingredients: string, mode: 'all' | 'any' = 'all') {

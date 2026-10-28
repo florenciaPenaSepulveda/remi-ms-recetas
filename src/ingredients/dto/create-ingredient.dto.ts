@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -32,4 +33,8 @@ export class CreateIngredientDto {
   @IsNumber({}, { message: 'Las calorías por unidad deben ser un número' })
   @Min(0, { message: 'Las calorías por unidad no pueden ser negativas' })
   caloriesPerUnit?: number;
+
+  @IsOptional()
+  @IsBoolean({ message: '"staple" debe ser verdadero o falso' })
+  staple?: boolean;
 }

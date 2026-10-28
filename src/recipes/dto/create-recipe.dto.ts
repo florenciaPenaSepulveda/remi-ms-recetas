@@ -96,6 +96,20 @@ export class CreateRecipeDto {
   @Max(100, { message: 'Las porciones admiten hasta 100' })
   servings: number;
 
+  @IsOptional()
+  @IsInt({
+    message: 'El tiempo de preparación debe ser un número entero de minutos',
+  })
+  @Min(1, { message: 'El tiempo de preparación debe ser al menos 1 minuto' })
+  @Max(1440, { message: 'El tiempo de preparación admite hasta 1440 minutos' })
+  prepMinutes?: number;
+
+  @IsOptional()
+  @IsIn(['facil', 'media', 'dificil'], {
+    message: 'La dificultad debe ser facil, media o dificil',
+  })
+  difficulty?: 'facil' | 'media' | 'dificil';
+
   @Transform(pasos)
   @IsArray({ message: 'Las instrucciones son obligatorias' })
   @ArrayMinSize(1, { message: 'Agrega al menos un paso de preparación' })
@@ -197,4 +211,19 @@ export class RecipesByIdsMessage {
   @ArrayMaxSize(100, { message: 'Se admiten hasta 100 recetas por consulta' })
   @IsMongoId({ each: true, message: 'ID de receta inválido' })
   ids: string[];
+}
+
+export class PantryMessage {
+  @IsArray({ message: 'Indica los ingredientes que tienes' })
+  @ArrayMinSize(1, { message: 'Indica al menos un ingrediente' })
+  @ArrayMaxSize(40, { message: 'Se admiten hasta 40 ingredientes' })
+  @IsString({ each: true, message: 'Cada ingrediente debe ser texto' })
+  @MaxLength(50, { each: true, message: 'Un ingrediente es demasiado largo' })
+  ingredients: string[];
+
+  @IsOptional()
+  @IsInt({ message: '"maxMissing" debe ser un número entero' })
+  @Min(0, { message: '"maxMissing" no puede ser negativo' })
+  @Max(10, { message: '"maxMissing" admite hasta 10' })
+  maxMissing?: number;
 }
