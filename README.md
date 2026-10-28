@@ -17,7 +17,11 @@ Microservicio de **Remi Recetas** que guarda las recetas y el catálogo de ingre
 
 ## Cómo funciona una receta
 
-Quien crea una receta indica los ingredientes por nombre (o por ID) y la cantidad. El servicio los busca en el catálogo, guarda la referencia y **calcula las calorías** como la suma de `cantidad × calorías por unidad` de cada ingrediente; el cliente no puede fijarlas. Las instrucciones llegan como texto, una línea por paso, y se guardan como lista de pasos.
+Quien crea una receta indica los ingredientes por nombre (o por ID) y la cantidad. El servicio los busca en el catálogo, guarda la referencia y **calcula las calorías** como la suma de `cantidad × calorías por unidad` de cada ingrediente; el cliente no puede fijarlas. Las instrucciones llegan como texto, una línea por paso, y se guardan como lista de pasos. Opcionalmente se indican el tiempo de preparación en minutos (`prepMinutes`) y la dificultad (`facil`, `media` o `dificil`).
+
+## Búsqueda por despensa
+
+`search_recipes_by_pantry` recibe los ingredientes que la persona tiene (sin distinguir mayúsculas ni tildes) y devuelve las recetas que se pueden armar con ellos. Los ingredientes marcados como **básicos** (`staple`: sal, aceite, azúcar) se asumen disponibles y nunca cuentan como faltantes; una receta solo se sugiere si coincide al menos un ingrediente principal y le faltan como máximo `maxMissing`. El resultado se ordena por menos faltantes y luego por más coincidencias.
 
 Solo la persona que creó una receta puede modificarla o eliminarla: el servicio compara el autor guardado con el usuario que el gateway autenticó y responde 403 si no coincide.
 
@@ -32,6 +36,8 @@ Solo la persona que creó una receta puede modificarla o eliminarla: el servicio
 | `remove_recipe` | `id`, `userId` | `{ id, deleted }` |
 | `find_recipes_by_user` | `userId` | Recetas de esa persona |
 | `find_recipes_by_ids` | `ids` (hasta 100) | Recetas con esos IDs |
+| `search_recipes_by_pantry` | `ingredients` (lista de nombres), `maxMissing` (0 a 10, por defecto 3) | Recetas con `match`: `have`, `missing`, `total` y `percent`, ordenadas por lo que falta |
+| `count_recipes` | — | Cantidad de recetas |
 | `search_recipes_by_ingredients` | `ingredients` (coma), `mode` (`all` o `any`) | Recetas |
 | `search_recipes_by_max_calories` | `max` | Recetas |
 | `search_recipes_by_calories_range` | `min`, `max` | Recetas |
