@@ -1,72 +1,76 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
+import {
+  CaloriesRangeMessage,
+  CategoriesMessage,
+  CreateRecipeMessage,
+  MaxCaloriesMessage,
+  RecipesByIdsMessage,
+  RemoveRecipeMessage,
+  SearchByIngredientsMessage,
+  UpdateRecipeMessage,
+  UserRecipesMessage,
+} from './dto/create-recipe.dto';
 import { RecipeService } from './recipes.service';
-import { CreateRecipeMicroDto } from './dto/create-recipe.dto';
-import { UpdateRecipeDto } from './dto/update-recipe.dto';
 
 @Controller()
 export class RecipeController {
   constructor(private readonly recipeService: RecipeService) {}
 
   @MessagePattern({ cmd: 'create_recipe' })
-  create(@Payload() dto: CreateRecipeMicroDto) {
-    console.log('📩 Mensaje recibido para crear receta:', dto);
+  create(@Payload() dto: CreateRecipeMessage) {
     return this.recipeService.create(dto);
   }
 
   @MessagePattern({ cmd: 'find_all_recipes' })
   findAll() {
-    console.log('📩 Mensaje recibido para obtener todas las recetas');
     return this.recipeService.findAll();
   }
 
   @MessagePattern({ cmd: 'find_recipe' })
   findOne(@Payload() id: string) {
-    console.log('📩 Mensaje recibido para obtener receta con ID:', id);
     return this.recipeService.findOne(id);
   }
 
   @MessagePattern({ cmd: 'update_recipe' })
-  update(@Payload() data: { id: string; dto: UpdateRecipeDto }) {
-    return this.recipeService.update(data.id, data.dto);
+  update(@Payload() { id, userId, dto }: UpdateRecipeMessage) {
+    return this.recipeService.update(id, userId, dto);
   }
 
   @MessagePattern({ cmd: 'remove_recipe' })
-  remove(@Payload() id: string) {
-    return this.recipeService.remove(id);
+  remove(@Payload() { id, userId }: RemoveRecipeMessage) {
+    return this.recipeService.remove(id, userId);
+  }
+
+  @MessagePattern({ cmd: 'find_recipes_by_ids' })
+  findByIds(@Payload() { ids }: RecipesByIdsMessage) {
+    return this.recipeService.findByIds(ids);
+  }
+
+  @MessagePattern({ cmd: 'find_recipes_by_user' })
+  findByUser(@Payload() { userId }: UserRecipesMessage) {
+    return this.recipeService.findByUser(userId);
   }
 
   @MessagePattern({ cmd: 'search_recipes_by_ingredients' })
   searchByIngredients(
-    @Payload()
-    data: {
-      ingredients: string;
-      mode?: 'all' | 'any';
-    },
+    @Payload() { ingredients, mode }: SearchByIngredientsMessage,
   ) {
-    return this.recipeService.searchByIngredients(
-      data.ingredients,
-      data.mode ?? 'all',
-    );
+    return this.recipeService.searchByIngredients(ingredients, mode);
   }
 
   @MessagePattern({ cmd: 'search_recipes_by_max_calories' })
-  searchByMaxCalories(@Payload() max: number) {
+  searchByMaxCalories(@Payload() { max }: MaxCaloriesMessage) {
     return this.recipeService.searchByMaxCalories(max);
   }
 
   @MessagePattern({ cmd: 'search_recipes_by_calories_range' })
-  searchByCaloriesRange(@Payload() data: { min: number; max: number }) {
-    return this.recipeService.searchByCaloriesRange(data.min, data.max);
-  }
-
-  @MessagePattern({ cmd: 'find_recipes_by_user' })
-  findByUser(@Payload() data: { userId: string }) {
-    return this.recipeService.findByUser(data.userId);
+  searchByCaloriesRange(@Payload() { min, max }: CaloriesRangeMessage) {
+    return this.recipeService.searchByCaloriesRange(min, max);
   }
 
   @MessagePattern({ cmd: 'search_recipes_by_categories' })
-  searchByCategories(@Payload() data: { categories: string }) {
-    return this.recipeService.searchByCategories(data.categories);
+  searchByCategories(@Payload() { categories }: CategoriesMessage) {
+    return this.recipeService.searchByCategories(categories);
   }
 }

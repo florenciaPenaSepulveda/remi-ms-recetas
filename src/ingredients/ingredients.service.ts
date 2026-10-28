@@ -1,142 +1,142 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import { RpcException } from '@nestjs/microservices';
-import { Ingredient } from './schemas/ingredient.schema';
+import { Model, isValidObjectId } from 'mongoose';
+import { Recipe } from '../recipes/schemas/recipe.schema';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
+import { Ingredient, IngredientDocument } from './schemas/ingredient.schema';
+
+const CODIGO_DUPLICADO = 11000;
+const MAXIMO_POR_CARGA = 500;
 
 @Injectable()
 export class IngredientsService {
   constructor(
     @InjectModel(Ingredient.name)
-    private ingredientModel: Model<Ingredient>,
+    private readonly ingredientModel: Model<IngredientDocument>,
+    @InjectModel(Recipe.name) private readonly recipeModel: Model<Recipe>,
   ) {}
 
-  // ✅ Crear un nuevo ingrediente
-  async create(createIngredientDto: CreateIngredientDto): Promise<Ingredient> {
-    const existing = await this.ingredientModel
-      .findOne({ name: createIngredientDto.name })
-      .exec();
+  async create(dto: CreateIngredientDto): Promise<IngredientDocument> {
+    try {
+      return await this.ingredientModel.create(dto);
+    } catch (error) {
+      throw this.traducir(error);
+    }
+  }
 
-    if (existing) {
+  findAll(): Promise<IngredientDocument[]> {
+    return this.ingredientModel.find().sort({ name: 1 }).exec();
+  }
+
+  async findOne(id: string): Promise<IngredientDocument> {
+    this.validarId(id);
+    const ingrediente = await this.ingredientModel.findById(id).exec();
+    if (!ingrediente) {
       throw new RpcException({
+        status: 404,
+        message: 'Ingrediente no encontrado',
+      });
+    }
+    return ingrediente;
+  }
+
+  async update(
+    id: string,
+    dto: UpdateIngredientDto,
+  ): Promise<IngredientDocument> {
+    this.validarId(id);
+    try {
+      const actualizado = await this.ingredientModel
+        .findByIdAndUpdate(id, dto, { new: true, runValidators: true })
+        .exec();
+      if (!actualizado) {
+        throw new RpcException({
+          status: 404,
+          message: 'Ingrediente no encontrado',
+        });
+      }
+      return actualizado;
+    } catch (error) {
+      throw this.traducir(error);
+    }
+  }
+
+  async remove(id: string): Promise<IngredientDocument> {
+    this.validarId(id);
+    const enUso = await this.recipeModel.exists({
+      'ingredients.ingredientId': id,
+    });
+    if (enUso) {
+      throw new RpcException({
+        status: 409,
+        message: 'El ingrediente se usa en recetas y no se puede eliminar',
+      });
+    }
+    const eliminado = await this.ingredientModel.findByIdAndDelete(id).exec();
+    if (!eliminado) {
+      throw new RpcException({
+        status: 404,
+        message: 'Ingrediente no encontrado',
+      });
+    }
+    return eliminado;
+  }
+
+  async populate(items: CreateIngredientDto[]) {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new RpcException({
+        status: 400,
+        message: 'La lista de ingredientes está vacía',
+      });
+    }
+    if (items.length > MAXIMO_POR_CARGA) {
+      throw new RpcException({
+        status: 400,
+        message: `Se admiten hasta ${MAXIMO_POR_CARGA} ingredientes por carga`,
+      });
+    }
+    const vistos = new Set<string>();
+    const unicos = items.filter((item) => {
+      const clave = item.name.toLowerCase();
+      if (vistos.has(clave)) {
+        return false;
+      }
+      vistos.add(clave);
+      return true;
+    });
+    const existentes = await this.ingredientModel
+      .find({ name: { $in: unicos.map((i) => i.name) } })
+      .select('name')
+      .exec();
+    const yaCargados = new Set(existentes.map((i) => i.name));
+    const nuevos = unicos.filter((i) => !yaCargados.has(i.name));
+    const created = nuevos.length
+      ? await this.ingredientModel.insertMany(nuevos, { ordered: false })
+      : [];
+    return {
+      created,
+      skipped: unicos.filter((i) => yaCargados.has(i.name)).map((i) => i.name),
+    };
+  }
+
+  private validarId(id: string) {
+    if (typeof id !== 'string' || !isValidObjectId(id)) {
+      throw new RpcException({
+        status: 400,
+        message: 'ID de ingrediente inválido',
+      });
+    }
+  }
+
+  private traducir(error: unknown) {
+    if ((error as { code?: number }).code === CODIGO_DUPLICADO) {
+      return new RpcException({
         status: 409,
         message: 'El ingrediente con este nombre ya existe',
       });
     }
-
-    const ingredient = new this.ingredientModel(createIngredientDto);
-    console.log('✅ Ingrediente creado:', ingredient.name);
-
-    return ingredient.save();
-  }
-
-  // 🔍 Obtener todos los ingredientes
-  async findAll(): Promise<Ingredient[]> {
-    const ingredients = await this.ingredientModel.find().exec();
-    if (!ingredients || ingredients.length === 0) {
-      throw new RpcException({
-        status: 404,
-        message: '❌No hay ingredientes registrados',
-      });
-    }
-    return ingredients;
-  }
-
-  // 🔍 Buscar un ingrediente por ID
-  async findOne(id: string): Promise<Ingredient> {
-    const ingredient = await this.ingredientModel.findById(id).exec();
-    if (!ingredient) {
-      throw new RpcException({
-        status: 404,
-        message: '❌Ingrediente no encontrado',
-      });
-    }
-    return ingredient;
-  }
-
-  // 🔍 Buscar por nombre (útil para autocompletar o validaciones)
-  async findByName(name: string): Promise<Ingredient | null> {
-    return this.ingredientModel.findOne({ name }).exec();
-  }
-
-  // ✏️ Actualizar un ingrediente
-  async update(
-    id: string,
-    updateIngredientDto: UpdateIngredientDto,
-  ): Promise<Ingredient> {
-    const updated = await this.ingredientModel
-      .findByIdAndUpdate(id, updateIngredientDto, { new: true })
-      .exec();
-
-    if (!updated) {
-      throw new RpcException({
-        status: 404,
-        message: '❌Ingrediente no encontrado',
-      });
-    }
-
-    console.log('🧾 Ingrediente actualizado:', updated.name);
-    return updated;
-  }
-
-  // 🗑️ Eliminar un ingrediente
-  async remove(id: string): Promise<Ingredient> {
-    const deleted = await this.ingredientModel.findByIdAndDelete(id).exec();
-    if (!deleted) {
-      throw new RpcException({
-        status: 404,
-        message: '❌Ingrediente no encontrado',
-      });
-    }
-    console.log('🗑️ Ingrediente eliminado:', deleted.name);
-    return deleted;
-  }
-
-  async populate(
-    ingredientsList: CreateIngredientDto[],
-  ): Promise<Ingredient[]> {
-    if (!ingredientsList || ingredientsList.length === 0) {
-      throw new RpcException({
-        status: 400,
-        message: '❌ Lista de ingredientes vacía o inválida',
-      });
-    }
-
-    // Limpieza básica y evitar duplicados dentro del array recibido
-    const uniqueNames = new Set();
-    const cleanList = ingredientsList.filter((i) => {
-      if (!i.name) return false;
-      const lower = i.name.trim().toLowerCase();
-      if (uniqueNames.has(lower)) return false;
-      uniqueNames.add(lower);
-      return true;
-    });
-
-    // Verificar duplicados ya existentes en la base de datos
-    const existing = await this.ingredientModel
-      .find({ name: { $in: cleanList.map((i) => i.name) } })
-      .select('name')
-      .exec();
-
-    const existingSet = new Set(existing.map((i) => i.name));
-
-    const newIngredients = cleanList.filter((i) => !existingSet.has(i.name));
-
-    if (newIngredients.length === 0) {
-      throw new RpcException({
-        status: 409,
-        message: '⚠️ Todos los ingredientes ya existen en la base de datos',
-      });
-    }
-
-    // Insertar ingredientes nuevos
-    const createdDocs = await this.ingredientModel.insertMany(newIngredients, {
-      ordered: false, // ignora duplicados intermedios
-    });
-
-    console.log(`✅ ${createdDocs.length} ingredientes agregados`);
-    return createdDocs; // Devuelve directamente los documentos creados
+    return error;
   }
 }

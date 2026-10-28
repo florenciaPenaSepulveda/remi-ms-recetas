@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Recipe, RecipeSchema } from './schemas/recipe.schema';
 import {
   Ingredient,
   IngredientSchema,
-} from 'src/ingredients/schemas/ingredient.schema';
-import { RecipeService } from './recipes.service';
+} from '../ingredients/schemas/ingredient.schema';
 import { RecipeController } from './recipe.controller';
+import { RecipeService } from './recipes.service';
+import { Recipe, RecipeSchema } from './schemas/recipe.schema';
 
 @Module({
   imports: [

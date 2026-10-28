@@ -1,52 +1,55 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import mongoose, { Document, Schema as MongooseSchema } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
-@Schema({ timestamps: true })
-export class Recipe extends Document {
+@Schema({ _id: false })
+export class RecipeIngredient {
   @Prop({
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Ingredient',
     required: true,
   })
-  userId: string;
+  ingredientId: Types.ObjectId;
+
+  @Prop({ required: true, min: 0 })
+  quantity: number;
+
+  @Prop({ trim: true })
+  unit?: string;
+}
+
+const RecipeIngredientSchema = SchemaFactory.createForClass(RecipeIngredient);
+
+@Schema({ timestamps: true })
+export class Recipe {
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    required: true,
+    index: true,
+  })
+  userId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
   title: string;
 
-  @Prop({ type: [String], default: [] })
+  @Prop({ type: [String], default: [], index: true })
   categories: string[];
 
-  @Prop({ required: true })
+  @Prop({ required: true, min: 1 })
   servings: number;
 
   @Prop({ type: [String], default: [] })
   instructions: string[];
 
-  @Prop()
+  @Prop({ trim: true })
   imageUrl?: string;
 
-  @Prop()
+  @Prop({ min: 0, index: true })
   calories?: number;
 
-  @Prop({
-    type: [
-      {
-        ingredientId: {
-          type: MongooseSchema.Types.ObjectId,
-          ref: 'Ingredient',
-          required: true,
-        },
-        quantity: { type: Number, required: true },
-        unit: { type: String }, // opcional, para sobrescribir unidad del ingrediente
-      },
-    ],
-    default: [],
-  })
-  ingredients: Array<{
-    ingredientId: string;
-    quantity: number;
-    unit?: string;
-  }>;
+  @Prop({ type: [RecipeIngredientSchema], default: [] })
+  ingredients: RecipeIngredient[];
 }
+
+export type RecipeDocument = HydratedDocument<Recipe>;
 
 export const RecipeSchema = SchemaFactory.createForClass(Recipe);

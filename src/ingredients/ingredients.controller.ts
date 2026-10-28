@@ -1,8 +1,11 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
-import { UpdateIngredientDto } from './dto/update-ingredient.dto';
+import {
+  PopulateIngredientsMessage,
+  UpdateIngredientMessage,
+} from './dto/update-ingredient.dto';
+import { IngredientsService } from './ingredients.service';
 
 @Controller()
 export class IngredientsController {
@@ -24,8 +27,8 @@ export class IngredientsController {
   }
 
   @MessagePattern({ cmd: 'update_ingredient' })
-  update(@Payload() data: { id: string; dto: UpdateIngredientDto }) {
-    return this.ingredientsService.update(data.id, data.dto);
+  update(@Payload() { id, dto }: UpdateIngredientMessage) {
+    return this.ingredientsService.update(id, dto);
   }
 
   @MessagePattern({ cmd: 'remove_ingredient' })
@@ -34,7 +37,7 @@ export class IngredientsController {
   }
 
   @MessagePattern({ cmd: 'populate_ingredients' })
-  populate(@Payload() ingredientsList: CreateIngredientDto[]) {
-    return this.ingredientsService.populate(ingredientsList);
+  populate(@Payload() { items }: PopulateIngredientsMessage) {
+    return this.ingredientsService.populate(items);
   }
 }

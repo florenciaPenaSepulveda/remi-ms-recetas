@@ -1,369 +1,240 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { RpcException } from '@nestjs/microservices';
-import { Model } from 'mongoose';
-import { Recipe } from './schemas/recipe.schema';
-import { CreateRecipeMicroDto } from './dto/create-recipe.dto';
-import { UpdateRecipeDto } from './dto/update-recipe.dto';
-import { Ingredient } from 'src/ingredients/schemas/ingredient.schema';
+import { FilterQuery, Model, Types, isValidObjectId } from 'mongoose';
+import {
+  Ingredient,
+  IngredientDocument,
+} from '../ingredients/schemas/ingredient.schema';
+import {
+  CreateRecipeDto,
+  IngredientEntryDto,
+  UpdateRecipeDto,
+} from './dto/create-recipe.dto';
+import { Recipe, RecipeDocument } from './schemas/recipe.schema';
 
-type NormalizedIngredient = {
-  ingredientId: string;
+interface LineaResuelta {
+  ingredientId: Types.ObjectId;
   quantity: number;
   unit?: string;
-};
+}
+
+const separar = (texto: string) =>
+  texto
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+const escaparRegex = (texto: string) =>
+  texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 @Injectable()
 export class RecipeService {
   constructor(
-    @InjectModel(Recipe.name) private recipeModel: Model<Recipe>,
+    @InjectModel(Recipe.name)
+    private readonly recipeModel: Model<RecipeDocument>,
     @InjectModel(Ingredient.name)
-    private ingredientModel: Model<Ingredient & { _id: string }>,
+    private readonly ingredientModel: Model<IngredientDocument>,
   ) {}
 
-  // ============================================================
-  // 🔥 UTILIDAD: Calcular calorías
-  // ============================================================
-  private async calculateCalories(
-    ingredients: NormalizedIngredient[],
-  ): Promise<number> {
-    let total = 0;
-
-    for (const item of ingredients) {
-      const ingredient = await this.ingredientModel
-        .findById(item.ingredientId)
-        .lean();
-
-      if (!ingredient) {
-        throw new RpcException({
-          status: 404,
-          message: `❌ Ingrediente con ID ${item.ingredientId} no existe`,
-        });
-      }
-
-      if (!ingredient.caloriesPerUnit) continue;
-
-      total += item.quantity * ingredient.caloriesPerUnit;
-    }
-
-    return total;
-  }
-
-  // ============================================================
-  // 🟢 Crear receta
-  // ============================================================
-  async create(dto: CreateRecipeMicroDto): Promise<Recipe> {
-    if (!dto.ingredients || dto.ingredients.length === 0) {
-      throw new RpcException({
-        status: 400,
-        message: '❌ La receta debe incluir al menos un ingrediente',
-      });
-    }
-
-    const normalizedIngredients: NormalizedIngredient[] = [];
-
-    for (const ing of dto.ingredients) {
-      const ingredientDoc = await this.ingredientModel.findOne({
-        name: ing.name,
-      });
-
-      if (!ingredientDoc) {
-        throw new RpcException({
-          status: 404,
-          message: `❌ Ingrediente no encontrado: ${ing.name}`,
-        });
-      }
-
-      normalizedIngredients.push({
-        ingredientId: ingredientDoc.id, // string seguro
-        quantity: ing.quantity,
-        unit: ing.unit ?? ingredientDoc.unit,
-      });
-    }
-
-    const calories = await this.calculateCalories(normalizedIngredients);
-
-    const recipe = new this.recipeModel({
+  async create(dto: CreateRecipeDto & { userId: string }) {
+    const { lineas, calorias } = await this.resolverIngredientes(
+      dto.ingredients,
+    );
+    const receta = await this.recipeModel.create({
       ...dto,
-      ingredients: normalizedIngredients, // aquí va la versión normalizada
-      userId: dto.userId,
-      calories,
+      ingredients: lineas,
+      calories: calorias,
     });
-
-    console.log(`🍽️ Receta creada: ${recipe.title}`);
-
-    return recipe.save();
+    return this.findOne(String(receta._id));
   }
 
-  // ============================================================
-  // 🔍 Obtener todas las recetas
-  // ============================================================
-  async findAll(): Promise<Recipe[]> {
-    const recipes = await this.recipeModel
-      .find()
-      .populate('ingredients.ingredientId')
-      .exec();
-
-    if (!recipes.length) {
-      throw new RpcException({
-        status: 404,
-        message: '❌ No hay recetas registradas',
-      });
-    }
-
-    return recipes;
+  findAll() {
+    return this.buscar({});
   }
 
-  // ============================================================
-  // 🔍 Obtener receta por ID
-  // ============================================================
-  async findOne(id: string): Promise<Recipe> {
-    const recipe = await this.recipeModel
+  async findOne(id: string) {
+    this.validarId(id, 'receta');
+    const receta = await this.recipeModel
       .findById(id)
       .populate('ingredients.ingredientId')
       .exec();
-
-    if (!recipe) {
-      throw new RpcException({
-        status: 404,
-        message: '❌ Receta no encontrada',
-      });
+    if (!receta) {
+      throw new RpcException({ status: 404, message: 'Receta no encontrada' });
     }
-
-    return recipe;
+    return receta;
   }
 
-  // ============================================================
-  // ✏️ Actualizar receta
-  // ============================================================
-  async update(id: string, dto: UpdateRecipeDto): Promise<Recipe> {
-    const recipe = await this.recipeModel.findById(id);
-
-    if (!recipe) {
-      throw new RpcException({
-        status: 404,
-        message: '❌ Receta no encontrada',
-      });
+  async update(id: string, userId: string, dto: UpdateRecipeDto) {
+    const receta = await this.recetaDelAutor(id, userId);
+    const { ingredients, ...resto } = dto;
+    receta.set(resto);
+    if (ingredients) {
+      const { lineas, calorias } = await this.resolverIngredientes(ingredients);
+      receta.set({ ingredients: lineas, calories: calorias });
     }
-
-    // Vamos a construir un "updateData" separado para no pelear con tipos del DTO
-    const updateData: any = { ...dto };
-
-    if (dto.ingredients) {
-      const normalizedIngredients: NormalizedIngredient[] = [];
-
-      for (const ing of dto.ingredients as any[]) {
-        let ingredientDoc: (Ingredient & { _id: string }) | null = null;
-
-        if (ing.name) {
-          ingredientDoc = await this.ingredientModel.findOne({
-            name: ing.name,
-          });
-        } else if (ing.ingredientId) {
-          ingredientDoc = await this.ingredientModel.findById(ing.ingredientId);
-        } else {
-          throw new RpcException({
-            status: 400,
-            message:
-              '❌ Cada ingrediente debe tener al menos "name" o "ingredientId"',
-          });
-        }
-
-        if (!ingredientDoc) {
-          throw new RpcException({
-            status: 404,
-            message: `❌ Ingrediente no encontrado: ${
-              ing.name || ing.ingredientId
-            }`,
-          });
-        }
-
-        normalizedIngredients.push({
-          ingredientId: ingredientDoc.id,
-          quantity: ing.quantity,
-          unit: ing.unit ?? ingredientDoc.unit,
-        });
-      }
-
-      // usamos la versión normalizada SOLO para guardar y calcular, NO para cambiar el tipo del DTO
-      updateData.ingredients = normalizedIngredients;
-      recipe.calories = await this.calculateCalories(normalizedIngredients);
-    }
-
-    Object.assign(recipe, updateData);
-
-    console.log(`📝 Receta actualizada: ${recipe.title}`);
-
-    return recipe.save();
+    await receta.save();
+    return this.findOne(id);
   }
 
-  // ============================================================
-  // 🗑️ Eliminar receta
-  // ============================================================
-  async remove(id: string): Promise<Recipe> {
-    const deleted = await this.recipeModel.findByIdAndDelete(id).exec();
-
-    if (!deleted) {
-      throw new RpcException({
-        status: 404,
-        message: '❌ Receta no encontrada',
-      });
-    }
-
-    console.log(`🗑️ Receta eliminada: ${deleted.title}`);
-
-    return deleted;
+  async remove(id: string, userId: string) {
+    const receta = await this.recetaDelAutor(id, userId);
+    await receta.deleteOne();
+    return { id, deleted: true };
   }
 
-  // ============================================================
-  // 🔍 Buscar recetas por ingredientes (ALL / ANY)
-  // ============================================================
+  findByUser(userId: string) {
+    this.validarId(userId, 'usuario');
+    return this.buscar({ userId: new Types.ObjectId(userId) });
+  }
+
+  findByIds(ids: string[]) {
+    return this.buscar({ _id: { $in: ids } });
+  }
+
   async searchByIngredients(ingredients: string, mode: 'all' | 'any' = 'all') {
-    if (!ingredients) {
+    const nombres = separar(ingredients);
+    if (!nombres.length) {
       throw new RpcException({
         status: 400,
-        message: '❌ Debes proporcionar al menos un ingrediente',
+        message: 'Debes proporcionar al menos un ingrediente',
       });
     }
-
-    // 1. Separar y limpiar nombres
-    const ingredientNames = ingredients.split(',').map((n) => n.trim());
-
-    // 2. Buscar ingredientes por name
-    const found = await this.ingredientModel.find({
-      name: { $in: ingredientNames },
+    const encontrados = await this.ingredientModel
+      .find({ name: { $in: nombres } })
+      .select('_id')
+      .exec();
+    if (
+      !encontrados.length ||
+      (mode === 'all' && encontrados.length < nombres.length)
+    ) {
+      return [];
+    }
+    const ids = encontrados.map((i) => i._id);
+    return this.buscar({
+      'ingredients.ingredientId': mode === 'all' ? { $all: ids } : { $in: ids },
     });
-
-    if (found.length !== ingredientNames.length) {
-      const missing = ingredientNames.filter(
-        (name) => !found.some((f) => f.name === name),
-      );
-      throw new RpcException({
-        status: 404,
-        message: `❌ Los siguientes ingredientes no existen: ${missing.join(', ')}`,
-      });
-    }
-
-    // 3. Convertir a IDs para hacer la búsqueda en recetas
-    const ingredientIds = found.map((i) => i._id);
-
-    // 4. Construir query según mode
-    const query =
-      mode === 'all'
-        ? { 'ingredients.ingredientId': { $all: ingredientIds } }
-        : { 'ingredients.ingredientId': { $in: ingredientIds } };
-
-    // 5. Buscar recetas
-    const recipes = await this.recipeModel
-      .find(query)
-      .populate('ingredients.ingredientId');
-
-    if (!recipes.length) {
-      throw new RpcException({
-        status: 404,
-        message: '❌ Ninguna receta coincide con los ingredientes buscados',
-      });
-    }
-
-    return recipes;
   }
 
-  // ============================================================
-  // 🔍 Buscar por calorías máximas
-  // ============================================================
-  async searchByMaxCalories(max: number) {
-    if (!max || max <= 0) {
+  searchByMaxCalories(max: number) {
+    return this.buscar({ calories: { $lte: max } });
+  }
+
+  searchByCaloriesRange(min: number, max: number) {
+    if (min > max) {
       throw new RpcException({
         status: 400,
-        message: '❌ El valor máximo de calorías es inválido',
+        message: 'El mínimo de calorías no puede superar al máximo',
       });
     }
-
-    const recipes = await this.recipeModel
-      .find({ calories: { $lte: max } })
-      .populate('ingredients.ingredientId');
-
-    if (!recipes.length) {
-      throw new RpcException({
-        status: 404,
-        message: `❌ No hay recetas con menos de ${max} calorías`,
-      });
-    }
-
-    return recipes;
+    return this.buscar({ calories: { $gte: min, $lte: max } });
   }
 
-  // ============================================================
-  // 🔍 Buscar por rango de calorías
-  // ============================================================
-  async searchByCaloriesRange(min: number, max: number) {
-    if (min == null || max == null || min < 0 || max <= 0 || min > max) {
+  searchByCategories(categories: string) {
+    const lista = separar(categories);
+    if (!lista.length) {
       throw new RpcException({
         status: 400,
-        message: '❌ Rango de calorías inválido',
+        message: 'Debes proporcionar al menos una categoría',
       });
     }
-
-    const recipes = await this.recipeModel
-      .find({
-        calories: {
-          $gte: min,
-          $lte: max,
-        },
-      })
-      .populate('ingredients.ingredientId');
-
-    if (!recipes.length) {
-      throw new RpcException({
-        status: 404,
-        message: `❌ No se encontraron recetas entre ${min} y ${max} calorías`,
-      });
-    }
-
-    return recipes;
+    return this.buscar({
+      categories: {
+        $in: lista.map((c) => new RegExp(`^${escaparRegex(c)}$`, 'i')),
+      },
+    });
   }
 
-  async findByUser(userId: string) {
-    const recipes = await this.recipeModel
-      .find({ userId })
+  private buscar(filtro: FilterQuery<RecipeDocument>) {
+    return this.recipeModel
+      .find(filtro)
+      .sort({ createdAt: -1 })
       .populate('ingredients.ingredientId')
       .exec();
-
-    if (!recipes.length) {
-      throw new RpcException({
-        status: 404,
-        message: '❌ Este usuario no tiene recetas registradas',
-      });
-    }
-
-    return recipes;
   }
 
-  async searchByCategories(categories: string) {
-    if (!categories || categories.trim().length === 0) {
+  private async recetaDelAutor(id: string, userId: string) {
+    this.validarId(id, 'receta');
+    const receta = await this.recipeModel.findById(id).exec();
+    if (!receta) {
+      throw new RpcException({ status: 404, message: 'Receta no encontrada' });
+    }
+    if (String(receta.userId) !== userId) {
+      throw new RpcException({
+        status: 403,
+        message: 'Solo la persona que creó la receta puede modificarla',
+      });
+    }
+    return receta;
+  }
+
+  private async resolverIngredientes(entradas: IngredientEntryDto[]) {
+    const sinReferencia = entradas.find((e) => !e.name && !e.ingredientId);
+    if (sinReferencia) {
       throw new RpcException({
         status: 400,
-        message: '❌ Debes proporcionar al menos una categoría',
+        message: 'Cada ingrediente debe indicar "name" o "ingredientId"',
       });
     }
-
-    // Separar y limpiar
-    const categoryList = categories.split(',').map((c) => c.trim());
-
-    const recipes = await this.recipeModel
-      .find({
-        categories: { $in: categoryList },
-      })
-      .populate('ingredients.ingredientId')
+    const nombres = entradas.flatMap((e) => (e.name ? [e.name] : []));
+    const ids = entradas.flatMap((e) =>
+      e.ingredientId ? [e.ingredientId] : [],
+    );
+    const documentos = await this.ingredientModel
+      .find({ $or: [{ name: { $in: nombres } }, { _id: { $in: ids } }] })
       .exec();
+    const porNombre = new Map(documentos.map((d) => [d.name, d]));
+    const porId = new Map(documentos.map((d) => [String(d._id), d]));
 
-    if (!recipes.length) {
+    const faltantes: string[] = [];
+    const vistos = new Set<string>();
+    const repetidos: string[] = [];
+    const lineas: LineaResuelta[] = [];
+    let calorias = 0;
+
+    for (const entrada of entradas) {
+      const documento = entrada.name
+        ? porNombre.get(entrada.name)
+        : porId.get(entrada.ingredientId as string);
+      if (!documento) {
+        faltantes.push(entrada.name ?? (entrada.ingredientId as string));
+        continue;
+      }
+      const clave = String(documento._id);
+      if (vistos.has(clave)) {
+        repetidos.push(documento.name);
+        continue;
+      }
+      vistos.add(clave);
+      lineas.push({
+        ingredientId: documento._id,
+        quantity: entrada.quantity,
+        unit: entrada.unit ?? documento.unit,
+      });
+      calorias += entrada.quantity * (documento.caloriesPerUnit ?? 0);
+    }
+
+    if (faltantes.length) {
       throw new RpcException({
         status: 404,
-        message: '❌ No se encontraron recetas para esas categorías',
+        message: `Ingredientes no encontrados: ${faltantes.join(', ')}`,
       });
     }
+    if (repetidos.length) {
+      throw new RpcException({
+        status: 400,
+        message: `Ingredientes repetidos: ${repetidos.join(', ')}`,
+      });
+    }
+    return { lineas, calorias: Math.round(calorias) };
+  }
 
-    return recipes;
+  private validarId(id: string, entidad: string) {
+    if (typeof id !== 'string' || !isValidObjectId(id)) {
+      throw new RpcException({
+        status: 400,
+        message: `ID de ${entidad} inválido`,
+      });
+    }
   }
 }

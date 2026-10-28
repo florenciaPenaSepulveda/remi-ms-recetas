@@ -1,23 +1,21 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { IngredientsModule } from './ingredients/ingredients.module';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { Env, validarEntorno } from './config/env';
+import { IngredientsModule } from './ingredients/ingredients.module';
 import { RecipeModule } from './recipes/recipes.module';
 
 @Module({
   imports: [
-    // Carga automática del archivo .env
-    ConfigModule.forRoot({
-      isGlobal: true, // Hace que las variables estén disponibles en toda la app
+    ConfigModule.forRoot({ isGlobal: true, validate: validarEntorno }),
+    MongooseModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) => ({
+        uri: config.get('MONGODB_URI', { infer: true }),
+      }),
     }),
-    // Conexión a MongoDB usando la variable de entorno
-    MongooseModule.forRoot(process.env.MONGODB_URI!),
     IngredientsModule,
     RecipeModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

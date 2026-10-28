@@ -1,18 +1,18 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { HydratedDocument } from 'mongoose';
 
 @Schema({ timestamps: true })
-export class Ingredient extends Document {
+export class Ingredient {
   @Prop({ required: true, unique: true, trim: true })
   name: string;
 
-  @Prop()
-  unit?: string; // "gramos", "ml", "unidad"
+  @Prop({ trim: true })
+  unit?: string;
 
-  @Prop()
-  caloriesPerUnit?: number; // kcal por unidad o por 100g (depende cómo lo definas)
+  @Prop({ min: 0 })
+  caloriesPerUnit?: number;
 }
 
-export const IngredientSchema = SchemaFactory.createForClass(Ingredient);
+export type IngredientDocument = HydratedDocument<Ingredient>;
 
-IngredientSchema.index({ name: 'text' });
+export const IngredientSchema = SchemaFactory.createForClass(Ingredient);
