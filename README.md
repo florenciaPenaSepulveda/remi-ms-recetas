@@ -94,7 +94,7 @@ npm run test:cov
 npm run lint
 ```
 
-Las pruebas levantan el servicio completo (validación y errores incluidos) sobre transporte TCP y lo consultan como lo haría el gateway; necesitan una MongoDB en `MONGODB_URI` (por defecto `mongodb://localhost:27018/remi_recetas_test`) y borran su base de pruebas al terminar. El CI ejecuta lint, compilación y pruebas con cobertura.
+Las pruebas levantan el servicio completo (validación y errores incluidos) sobre transporte TCP y lo consultan como lo haría el gateway; necesitan una MongoDB en `MONGODB_URI` (por defecto `mongodb://localhost:27017/remi_recetas_test`) y borran su base de pruebas al terminar. El CI ejecuta lint, compilación y pruebas con cobertura.
 
 ## Docker
 
